@@ -1,134 +1,164 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import {
+	App,
+	Plugin,
+	PluginSettingTab,
+	Setting,
+	Notice,
+	TFile,
+} from "obsidian";
+import * as child_process from "child_process";
 
-// Remember to rename these classes and interfaces!
-
-interface MyPluginSettings {
-	mySetting: string;
+interface FileExecutorSettings {
+	exeMap: { [key: string]: string };
 }
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
-}
+const DEFAULT_SETTINGS: FileExecutorSettings = {
+	exeMap: {
+		pdf: "D:/DocBox/DocBox.exe", // 默认文件类型和对应的exe路径
+	},
+};
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+export default class FileExecutorPlugin extends Plugin {
+	settings: FileExecutorSettings;
 
 	async onload() {
+		console.log("loading FileExecutorPlugin");
 		await this.loadSettings();
-
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
-
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
-
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			}
-		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-	}
-
-	onunload() {
-
+		this.registerEvents();
+		this.addSettingTab(new FileExecutorSettingTab(this.app, this));
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		this.settings = Object.assign(
+			{},
+			DEFAULT_SETTINGS,
+			await this.loadData()
+		);
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
 	}
+
+	registerEvents() {
+		this.app.workspace.on("file-open", (file: TFile) => {
+			const fileExtension = file.name.split(".").pop()?.toLowerCase();
+			if (!fileExtension) {
+				new Notice("Unable to determine file type.", 0);
+				return;
+			}
+
+			const exePath = this.settings.exeMap[fileExtension];
+			if (exePath) {
+				const basePath = (this.app.vault.adapter as any).getBasePath();
+				const fullPath = `${basePath}/${file.path}`;
+				// console.log('Full path:', fullPath);
+				this.openFileWithExe(fullPath, exePath);
+
+                //!关掉在ob中打开的文件
+				// 找到当前活动组的所有文件
+				//@ts-ignore
+				const activeTabGroup = this.app.workspace.activeTabGroup;
+				if (activeTabGroup) {
+					// 获取所有当前活动选项卡的文件路径
+					//@ts-ignore
+					const activeTabFiles = activeTabGroup.children.map((tab) => tab.view.getState().file);
+					// 查找文件路径的索引
+					const fileTabIndex = activeTabFiles.indexOf(file.path);
+
+					// 如果文件存在于活动选项卡中，关闭该选项卡
+					if (fileTabIndex !== -1) {
+						const leaf = activeTabGroup.children[fileTabIndex];
+						leaf.detach();
+					}
+				}
+			}
+		});
+	}
+
+	openFileWithExe(filePath: string, exePath: string) {
+		child_process.exec(
+			`"${exePath}" "${filePath}"`,
+			(error, stdout, stderr) => {
+				if (error) {
+					console.error("Error executing file with exe:", error);
+					new Notice(
+						"Error opening file with specified exe: " +
+							error.message
+					);
+				} else {
+					console.log("File opened with exe:", stdout);
+				}
+			}
+		);
+	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
+class FileExecutorSettingTab extends PluginSettingTab {
+	plugin: FileExecutorPlugin;
 
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
-
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: FileExecutorPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
 
 	display(): void {
-		const {containerEl} = this;
+		let { containerEl } = this;
 
 		containerEl.empty();
+		containerEl.createEl("h2", { text: "File Executor Settings" });
 
 		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
-				}));
+			.setName("Add new file extension mapping")
+			.setDesc("Add a new mapping of file extension to executable path.")
+			.addText((cb) => {
+				cb.inputEl.addClass("file-extension");
+				cb.setPlaceholder("File Extension (e.g. 'pdf')");
+			})
+			.addText((cb) => {
+				cb.inputEl.addClass("exe-path");
+				cb.setPlaceholder("Exe Path，use / instead of\\");
+			})
+			.addButton((btn) => {
+				btn.setButtonText("+")
+					.setCta()
+					.onClick(async () => {
+						//@ts-ignore
+						const fileExtension = document.querySelector(".file-extension").value.toLowerCase();
+						//@ts-ignore
+						const exePath =document.querySelector(".exe-path").value;
+
+						if (fileExtension && exePath) {
+							this.plugin.settings.exeMap[fileExtension] =
+								exePath;
+							await this.plugin.saveSettings();
+							this.display();
+							new Notice(`Mapping for ${fileExtension} added.`);
+						} else {
+							new Notice(
+								"File Extension and Executable Path are required."
+							);
+						}
+					});
+			});
+
+		containerEl.createEl("h3", { text: "Current Mappings" });
+		for (const [fileExtension, exePath] of Object.entries(
+			this.plugin.settings.exeMap
+		)) {
+			new Setting(containerEl)
+				.setName(fileExtension)
+				.setDesc(exePath)
+				.addButton((btn) => {
+					btn.setIcon("trash")
+						.setTooltip("Remove")
+						.onClick(async () => {
+							delete this.plugin.settings.exeMap[fileExtension];
+							await this.plugin.saveSettings();
+							this.display();
+							new Notice(`Mapping for ${fileExtension} removed.`);
+						});
+				});
+		}
 	}
 }
