@@ -1,7 +1,7 @@
 {
 	"id": "open-according-to-extension",
 	"name": "Open According to Extension",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"minAppVersion": "0.15.0",
 	"description": "open file in the exe according to extension",
 	"author": "Obsidian",
